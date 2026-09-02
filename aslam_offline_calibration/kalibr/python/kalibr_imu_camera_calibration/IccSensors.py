@@ -2,6 +2,7 @@ from __future__ import print_function #handle print in 2.x python
 import sm
 import aslam_cv as acv
 import aslam_cameras_april as acv_april
+import aslam_cameras_charuco as acv_charuco
 import aslam_splines as asp
 import aslam_backend as aopt
 import bsplines
@@ -100,10 +101,23 @@ class IccCamera():
             options.minTagsForValidObs = int( np.max( [targetParams['tagRows'], targetParams['tagCols']] ) + 1 )
             
             grid = acv_april.GridCalibrationTargetAprilgrid(targetParams['tagRows'],
-                                                            targetParams['tagCols'], 
-                                                            targetParams['tagSize'], 
-                                                            targetParams['tagSpacing'], 
+                                                            targetParams['tagCols'],
+                                                            targetParams['tagSize'],
+                                                            targetParams['tagSpacing'],
                                                             options)
+        elif targetType == 'charuco':
+            options = acv_charuco.CharucoOptions()
+            options.minCornersForValidObs = 6
+            options.showExtractionVideo = showExtraction
+            dictionary = targetParams['dictionary']
+            if isinstance(dictionary, str):
+                dictionary = acv_charuco.ARUCO_DICTIONARIES[dictionary]
+            grid = acv_charuco.GridCalibrationTargetCharuco(targetParams['squaresX'],
+                                                           targetParams['squaresY'],
+                                                           targetParams['squareLength'],
+                                                           targetParams['markerLength'],
+                                                           dictionary,
+                                                           options)
         else:
             raise RuntimeError( "Unknown calibration target." )
                           

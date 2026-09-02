@@ -536,9 +536,10 @@ class CalibrationTargetParameters(ParametersBase):
     # Accessors
     ###################################################
     def checkTargetType(self, target_type):
-        targetTypes = ['aprilgrid', 
+        targetTypes = ['aprilgrid',
                        'checkerboard',
-                       'circlegrid']
+                       'circlegrid',
+                       'charuco']
         
         if target_type not in targetTypes:
             self.raiseError('Unknown calibration target type. Supported types: {0}. )'.format(targetTypes) )
@@ -624,7 +625,35 @@ class CalibrationTargetParameters(ParametersBase):
                             'tagSize': tagSize,
                             'tagSpacing': tagSpacing,
                             'targetType': targetType}
-            
+
+        elif targetType == 'charuco':
+            try:
+                squaresX = self.data["squaresX"]
+                squaresY = self.data["squaresY"]
+                squareLength = self.data["squareLength"]
+                markerLength = self.data["markerLength"]
+                dictionary = self.data["dictionary"]
+            except KeyError as e:
+                self.raiseError("Calibration target configuration in {0} is missing the field: {1}".format(self.yamlFile, str(e)) )
+
+            if not isinstance(squaresX, int) or squaresX < 2:
+                self.raiseError("invalid squaresX (int>=2)")
+            if not isinstance(squaresY, int) or squaresY < 2:
+                self.raiseError("invalid squaresY (int>=2)")
+            if not isinstance(squareLength, (int, float)) or squareLength <= 0.0:
+                self.raiseError("invalid squareLength (float>0)")
+            if not isinstance(markerLength, (int, float)) or markerLength <= 0.0:
+                self.raiseError("invalid markerLength (float>0)")
+            if not isinstance(dictionary, (str, int)):
+                self.raiseError("invalid dictionary (str or int)")
+
+            targetParams = {'squaresX': squaresX,
+                            'squaresY': squaresY,
+                            'squareLength': squareLength,
+                            'markerLength': markerLength,
+                            'dictionary': dictionary,
+                            'targetType': targetType}
+
         return targetParams
         
     ###################################################
@@ -650,6 +679,13 @@ class CalibrationTargetParameters(ParametersBase):
             print("    Cols: {0}".format(targetParams['tagCols']), file=dest)
             print("    Size: {0} [m]".format(targetParams['tagSize']), file=dest)
             print("    Spacing {0} [m]".format( targetParams['tagSize']*targetParams['tagSpacing'] ), file=dest)
+        elif targetType == 'charuco':
+            print("  Squares: ", file=dest)
+            print("    X: {0}".format(targetParams['squaresX']), file=dest)
+            print("    Y: {0}".format(targetParams['squaresY']), file=dest)
+            print("    Length: {0} [m]".format(targetParams['squareLength']), file=dest)
+            print("    Marker length: {0} [m]".format(targetParams['markerLength']), file=dest)
+            print("    Dictionary: {0}".format(targetParams['dictionary']), file=dest)
 
 
         
