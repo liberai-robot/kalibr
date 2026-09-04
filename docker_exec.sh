@@ -18,13 +18,14 @@
 set -euo pipefail
 
 CONTAINER="${KALIBR_CONTAINER:-kalibr}"
+WORKDIR='/catkin_ws'
 ROS_SETUP='source /opt/ros/noetic/setup.bash && source /catkin_ws/devel/setup.bash'
 
 if [ $# -eq 0 ]; then
-  echo "[docker_exec] 进入容器 ${CONTAINER} (ROS + kalibr devel 已 source)，退出: exit / Ctrl-D"
-  exec docker exec -it "${CONTAINER}" bash -lc "${ROS_SETUP} && exec bash"
+  echo "[docker_exec] 进入容器 ${CONTAINER} (ROS + kalibr devel 已 source, 工作目录 ${WORKDIR})，退出: exit / Ctrl-D"
+  exec docker exec -it "${CONTAINER}" bash -lc "${ROS_SETUP} && cd ${WORKDIR} && exec bash"
 fi
 
 # 执行单条命令 (逐参数 shell 转义, 保留引号语义)
 cmd=$(printf '%q ' "$@")
-exec docker exec "${CONTAINER}" bash -lc "${ROS_SETUP} && ${cmd}"
+exec docker exec "${CONTAINER}" bash -lc "${ROS_SETUP} && cd ${WORKDIR} && ${cmd}"

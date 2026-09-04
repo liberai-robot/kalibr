@@ -1,50 +1,13 @@
-# head_ring 数采头环配置
-# camera node 与 viewer node 共用此文件。
+# head_ring 桥接配置 (camera_ros_bridge_node.py 读取)
+# 采集端相机参数 (type/resolution/fps/帧同步等) 由另一工程 slam_device/head_ring 管理。
 
 zenoh:
-  prefix: head_ring        # zenoh key 前缀: head_ring/cam_a/image, head_ring/imu ...
-  shm_pool_mb: 512         # 共享内存池大小 (camera node 侧); 订阅者被强杀会
-                           # 泄漏引用, 大一点能扛更久 (泄漏后仍会自动重建池)
-  # 默认走本机 multicast scouting 自动发现, 无需额外配置。
-  # 跨机器时可指定 endpoints, 例如: connect: ["tcp/192.168.1.10:7447"]
+  prefix: head_ring        # zenoh key 前缀: head_ring/cam_0/image, head_ring/imu ...
+  # 默认走本机 multicast scouting 自动发现，无需额外配置。
+  # 跨机器时可指定 endpoints，例如: connect: ["tcp/192.168.1.10:7447"]
   connect: []
   listen: []
 
 camera:
-  # 使用的板载插座, 顺序即 cam_index 顺序
-  sockets: [CAM_A, CAM_B, CAM_C, CAM_D]
-  # auto: 按传感器首选类型自动选 color/mono; 也可强制 color 或 mono。
-  # 本环四路实际都是 B0335 (OV9782 彩色), 但 depthai 分不清 OV9782/OV9282
-  # (芯片 ID 相同), 把 B/C/D 误报为 OV9282 默认走单色 —— 因此强制 color:
-  # 四路 800p 经 ISP 去马赛克 + isp_scale 1/2 -> 640x400 i420 彩色 (~46MB/s)。
-  # 如需回到黑白低带宽: type: mono + resolution: 400p。
-  type: color
-  # auto: 按传感器原生分辨率; 或指定 400p/480p/720p/800p/1080p/1200p/4k
-  # color 通路无 400p 档, 用 800p + isp_scale [1,2] 得到 640x400
-  resolution: 800p
-  fps: 30   # 30 是本设备实测可持续满速的档位; >30 请求会变成突发+卡顿,
-            # 持续吞吐反而只有 ~26Hz (2026-08-10 实测, 详见 README 帧率章节)
-  # 自动曝光上限 (us)。压运动模糊用: 模糊像素 ≈ 角速度 x 曝光 x fx,
-  # 10000(默认AE实测) 在 256 deg/s 下糊 ~5.6px; 标定动态段/剧烈运动建议 2000~4000。
-  # null = 不限制
-  exposure_max_us: null
-  # ISP 缩放 (仅 color 通路有效, mono 通路忽略), [分子, 分母]。null 表示不缩放。
-  # 例: type: auto 时 OV9782 800p + [1,2] -> 640x400 i420。
-  isp_scale: [1, 2]
-  # none: 原始帧 (NV12/GRAY8, 零拷贝优先); mjpeg: 设备端硬件编码后再发布
-  compression: none
-  mjpeg_quality: 90
-  # 硬件帧同步: auto 按传感器自动选择 (AR0234 -> script, OV9782/OV9282 -> master), 或强制 script/master/off
-  hw_sync: auto
-  # 设备端 Sync 节点的对齐阈值 (ms)。必须小于半个帧周期 (30fps -> <16.6ms),
-  # 否则 Sync 节点会错位配组 (实测 50ms 时恒定差一帧)。15ms 实测: 30Hz 满帧率, 组内散布 0.034ms。
-  sync_threshold_ms: 15
-
-imu:
-  enabled: true
-  hz: 200
-
-viewer:
-  tile_width: 640          # 拼图中每路画面的显示宽度 (发布端默认 640x512 MONO8,
-                           # 设成源宽免去无谓放大, 降低订阅端 CPU/内存负载)
-  max_display_hz: 30
+  # 四路相机 topic 名，顺序即 cam_index 顺序 (与采集端一致)
+  topics: [cam_0, cam_1, cam_2, cam_3]

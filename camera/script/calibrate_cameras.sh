@@ -25,10 +25,10 @@ TARGET="${CAMERA_DIR}/config/charuco_target.yaml"
 MODELS=( pinhole-equi pinhole-equi pinhole-equi pinhole-equi )
 
 TOPICS=(
-  /head_ring/cam_a/image
-  /head_ring/cam_b/image
-  /head_ring/cam_c/image
-  /head_ring/cam_d/image
+  /head_ring/cam_0/image
+  /head_ring/cam_1/image
+  /head_ring/cam_2/image
+  /head_ring/cam_3/image
 )
 
 BAG="${1:?用法: calibrate_cameras.sh <bag路径> [bag-freq]}"

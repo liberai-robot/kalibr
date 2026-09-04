@@ -15,7 +15,7 @@
 | `script/calibrate_imu_camera.sh` | **联合标定脚本**：`kalibr_calibrate_imu_camera`，bag/camchain 由参数传入，target/imu/imu-models 用文件夹内默认值 |
 | `script/visualize_imu_camera.py` | **可视化脚本**：3D 绘制 camchain-imucam.yaml 中相机与 IMU 的相对位姿（输入为标定文件路径） |
 | `record/` | 录制 bag 输出目录（脚本运行时自动创建） |
-| `config/head_ring.yaml` | 采集配置（`camera`/`imu`/`zenoh` 三段，与采集端共用；桥接节点读 `prefix`/`sockets` 与 zenoh 端点） |
+| `config/head_ring.yaml` | 桥接配置（`zenoh.prefix`/`camera.topics`/zenoh 端点，桥接节点读取；采集端相机参数由另一工程管理） |
 | `config/imu.yaml` | IMU 噪声参数（加速度计/陀螺仪噪声密度 + 随机游走 + `rostopic`） |
 | `config/charuco_target.yaml` | ChArUco 标定板几何（kalibr 标定用） |
 
@@ -52,7 +52,7 @@ source /opt/ros/noetic/setup.bash
 python camera_ros_bridge_node.py --config camera/config/head_ring.yaml
 ```
 
-验证消息已进 ROS：`rostopic hz /head_ring/cam_a/image`（约 30Hz）、`rostopic hz /head_ring/imu`（约 200Hz）。
+验证消息已进 ROS：`rostopic hz /head_ring/cam_0/image`（约 30Hz）、`rostopic hz /head_ring/imu`（约 200Hz）。
 
 ## 4. 发布 topic
 
@@ -60,43 +60,33 @@ prefix 来自配置 `zenoh.prefix`（示例为 `head_ring`）：
 
 | topic | 类型 | 说明 |
 |---|---|---|
-| `/head_ring/cam_a/image` … `/head_ring/cam_d/image` | `sensor_msgs/Image` | 四路相机图像，编码 `mono8`（灰度）/ `bgr8`（彩色），frame_id = `cam_x_optical` |
+| `/head_ring/cam_0/image` … `/head_ring/cam_3/image` | `sensor_msgs/Image` | 四路相机图像，编码 `mono8`（灰度）/ `bgr8`（彩色），frame_id = `cam_0_optical` |
 | `/head_ring/imu` | `sensor_msgs/Imu` | IMU（`angular_velocity` rad/s、`linear_acceleration` m/s²；BNO086 另含 `orientation`），frame_id = `imu` |
 
 topic 命名与采集端 zenoh 一致（`{prefix}/cam_x/image`、`{prefix}/imu`），可直接用 `rosbag record` 录制。
 
 ## 5. 配置说明（`config/head_ring.yaml`）
 
-与采集端共用同一份配置，桥接节点只用到 `zenoh.prefix`、`camera.sockets` 与 zenoh 端点：
+桥接节点只读取 `zenoh.prefix`、`camera.topics` 与 zenoh 端点；采集端相机参数（`type`/`resolution`/`fps`/帧同步等）由另一工程 `slam_device/head_ring` 管理：
 
 ```yaml
 zenoh:
-  prefix: head_ring          # topic 前缀（桥接节点读这里）
+  prefix: head_ring                    # zenoh key / topic 前缀（桥接节点读这里）
+  connect: []                          # 跨机器指定 endpoints，例如 ["tcp/192.168.1.10:7447"]
+  listen: []
 camera:
-  sockets: [CAM_A, CAM_B, CAM_C, CAM_D]
-  type: color                # auto | color | mono
-  resolution: 800p           # auto | 400p | 480p | 720p | 800p | 1080p | 1200p | 4k
-  fps: 30
-  isp_scale: [1, 2]          # 仅 color 通路，ISP 缩放 [分子, 分母]
-  exposure_max_us: null      # 自动曝光上限（压运动模糊），null = 不限制
-  compression: none          # none（原始帧）| mjpeg（设备端硬件编码）
-  mjpeg_quality: 90
-  hw_sync: auto              # auto | master | script | off（四路硬件帧同步方案）
-  sync_threshold_ms: 15      # 设备端 Sync 节点对齐阈值（须 < 半个帧周期）
-imu:
-  enabled: true
-  hz: 200
+  topics: [cam_0, cam_1, cam_2, cam_3]  # 四路相机 topic 名，顺序即 cam_index
 ```
 
 关键点：
-- `sockets` 顺序即 `cam_index` 顺序，topic 为 `cam_a`…`cam_d`。
-- 桥接节点按 socket 名（`cam_a`…`cam_d`）订阅，与 `type`/`resolution`/`compression` 等采集参数无关；编码由消息内 `FrameMeta.encoding` 决定，桥接节点自动转成 `mono8`/`bgr8`。
+- `topics` 顺序即 `cam_index` 顺序，topic 为 `cam_0`…`cam_3`。
+- 桥接节点按 `topics`（`cam_0`…`cam_3`）订阅 zenoh、发布 ROS；编码由消息内 `FrameMeta.encoding` 决定，自动转成 `mono8`/`bgr8`。
 
 ## 6. 时间戳说明
 
 depthai 的 `ImgFrame.getTimestamp()`、IMU 时间戳同处**设备内部时钟域**（自设备启动起算的单调时钟），与宿主机 Unix epoch 相差一个固定偏移。
 
-桥接节点从图像消息的 `pub_ns - ts_ns` 中位数估算该偏移（每帧发布时宿主机时间 `pub_ns` 与设备时间戳 `ts_ns` 成对出现），再对相机与 IMU 的时间戳统一加偏移换算成 `rospy.Time`（`header.stamp` 的 secs/nsecs）。四路相机与 IMU 共用同一设备时钟域，换算后彼此相对时序不变，满足 kalibr 相机-IMU 同步标定要求。
+桥接节点用**订阅到的第一帧图像**的 `pub_ns - ts_ns` 固定估算该偏移（`pub_ns` 为宿主机发布时刻，`ts_ns` 为设备时间戳），之后不再更新，再对相机与 IMU 的时间戳统一加偏移换算成 `rospy.Time`（`header.stamp` 的 secs/nsecs）。四路相机与 IMU 共用同一设备时钟域，换算后彼此相对时序不变，满足 kalibr 相机-IMU 同步标定要求。
 
 ## 7. 录制 bag 供 kalibr 标定
 
@@ -111,8 +101,8 @@ bash camera/script/record_cameras.sh   # 录制中 Ctrl+C 停止
 ```bash
 source /opt/ros/noetic/setup.bash
 rosbag record -O record/cameras_$(date +%Y%m%d_%H%M%S).bag \
-  /head_ring/cam_a/image /head_ring/cam_b/image \
-  /head_ring/cam_c/image /head_ring/cam_d/image \
+  /head_ring/cam_0/image /head_ring/cam_1/image \
+  /head_ring/cam_2/image /head_ring/cam_3/image \
   /head_ring/imu
 ```
 
@@ -125,8 +115,8 @@ rosrun kalibr kalibr_calibrate_cameras \
   --target camera/config/charuco_target.yaml \
   --bag record/cameras_<时间戳>.bag \
   --models pinhole-equi pinhole-equi pinhole-equi pinhole-equi \
-  --topics /head_ring/cam_a/image /head_ring/cam_b/image \
-           /head_ring/cam_c/image /head_ring/cam_d/image \
+  --topics /head_ring/cam_0/image /head_ring/cam_1/image \
+           /head_ring/cam_2/image /head_ring/cam_3/image \
   --bag-freq 4
 ```
 
@@ -148,8 +138,8 @@ source /opt/ros/noetic/setup.bash
 source /catkin_ws/devel/setup.bash
 python charuco_online_detector_node.py \
   --target config/charuco_target.yaml \
-  --topics /head_ring/cam_a/image /head_ring/cam_b/image \
-           /head_ring/cam_c/image /head_ring/cam_d/image
+  --topics /head_ring/cam_0/image /head_ring/cam_1/image \
+           /head_ring/cam_2/image /head_ring/cam_3/image
 ```
 
 四路画面拼接成一幅大图（单窗口 `head_ring`）显示，绿色文字显示检出的 ChArUco 角点数，每个角点旁标注角点 id，红色 `no detection` 表示未检出；按 `q` 退出。

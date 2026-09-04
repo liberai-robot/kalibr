@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ChArUco 在线检测节点 (rospy + aslam_cameras_charuco 绑定)。
 
-订阅 camera_ros_bridge_node.py 发布的图像 topic（默认 /head_ring/cam_a/image ~
-cam_d/image），对每一帧调用 aslam_cameras_charuco 的 GridCalibrationTargetCharuco
+订阅 camera_ros_bridge_node.py 发布的图像 topic（默认 /head_ring/cam_0/image ~
+cam_3/image），对每一帧调用 aslam_cameras_charuco 的 GridCalibrationTargetCharuco
 做 ChArUco 角点检测，把多路画面拼接成一幅大图用 imshow 实时显示，并在每个检出的
 角点旁标注角点 id，用于标定前预览检测效果、确认标定板在四路相机中都能稳定被检出。
 
@@ -17,8 +17,8 @@ cam_d/image），对每一帧调用 aslam_cameras_charuco 的 GridCalibrationTar
   source /opt/ros/noetic/setup.bash && source /catkin_ws/devel/setup.bash
   python3 charuco_online_detector_node.py \
       --target config/charuco_target.yaml \
-      --topics /head_ring/cam_a/image /head_ring/cam_b/image \
-               /head_ring/cam_c/image /head_ring/cam_d/image
+      --topics /head_ring/cam_0/image /head_ring/cam_1/image \
+               /head_ring/cam_2/image /head_ring/cam_3/image
 """
 
 import argparse
@@ -75,7 +75,7 @@ class CharucoDetector:
 
 
 def _camera_name_from_topic(topic):
-    """由 topic 名推导相机名: /head_ring/cam_a/image -> cam_a。"""
+    """由 topic 名推导相机名: /head_ring/cam_0/image -> cam_0。"""
     parts = topic.rstrip('/').split('/')
     return parts[-2] if len(parts) >= 2 else topic.replace('/', '_')
 
@@ -201,10 +201,10 @@ def main():
                         help="标定板 YAML（charuco_target.yaml 格式）")
     parser.add_argument("--topics", nargs="+",
                         default=[
-                            "/head_ring/cam_a/image",
-                            "/head_ring/cam_b/image",
-                            "/head_ring/cam_c/image",
-                            "/head_ring/cam_d/image",
+                            "/head_ring/cam_0/image",
+                            "/head_ring/cam_1/image",
+                            "/head_ring/cam_2/image",
+                            "/head_ring/cam_3/image",
                         ],
                         help="要订阅的图像 topic（默认四路头环）")
     parser.add_argument("--min-corners", type=int, default=4,

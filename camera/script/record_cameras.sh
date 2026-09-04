@@ -22,10 +22,10 @@ BAG="${RECORD_DIR}/cameras_${STAMP}.bag"
 # 标定数据 topic：四路相机图像 + IMU。
 # 仅做相机内/外参标定（kalibr_calibrate_cameras）时可删掉 imu 一行。
 TOPICS=(
-  /head_ring/cam_a/image
-  /head_ring/cam_b/image
-  /head_ring/cam_c/image
-  /head_ring/cam_d/image
+  /head_ring/cam_0/image
+  /head_ring/cam_1/image
+  /head_ring/cam_2/image
+  /head_ring/cam_3/image
   /head_ring/imu
 )
 

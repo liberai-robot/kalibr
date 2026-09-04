@@ -3,24 +3,26 @@
 
 不再直接访问 OAK 设备 (避开 depthai 2.x/3.x 版本冲突): 从宿主机 camera_node
 (zenoh 发布) 订阅图像/IMU 消息, 解码后转发为 ROS 标准 topic:
-  {prefix}/cam_a/image ... {prefix}/cam_d/image   sensor_msgs/Image  (mono8 / bgr8)
+  {prefix}/cam_0/image ... {prefix}/cam_3/image   sensor_msgs/Image  (mono8 / bgr8)
   {prefix}/imu                                   sensor_msgs/Imu
 
 线上消息格式 (与 head_ring/messages.py 保持一致):
   图像: payload = 原始帧 (NV12/I420/MONO8/MJPEG/BGR8), attachment = FrameMeta 定长 struct
   IMU : payload = ImuSample 定长 struct
 
-时间戳: ts_ns (设备时钟) + 由图像消息 pub_ns - ts_ns 中位数估算的偏移 -> ROS wall-clock。
+时间戳: ts_ns (设备时钟) + 由首帧图像消息 pub_ns - ts_ns 估算的偏移 -> ROS wall-clock。
 四路相机与 IMU 共用同一设备时钟域, 相对时序保留, 满足 kalibr 相机-IMU 同步标定要求
 (kalibr 仍会用 --time-calibration 进一步估计相机-IMU 时延)。
 
 用法:
   source /opt/ros/noetic/setup.bash
-  python camera_ros_bridge_node.py --config camera/config/head_ring.yaml
+  python camera_ros_bridge_node.py                      # 默认读同目录 config/head_ring.yaml
+  python camera_ros_bridge_node.py --config <自定义路径>
 """
 
 import argparse
 import json
+import os
 import struct
 import threading
 import time
@@ -90,26 +92,21 @@ def _decode_frame(enc: int, payload: bytes, width: int, height: int) -> np.ndarr
 # 设备时钟 -> ROS 时间偏移估算
 # ---------------------------------------------------------------------------
 class ClockOffset:
-    """由图像消息的 pub_ns - ts_ns 中位数估算设备时钟 -> 宿主机时钟的偏移 (ns)。
+    """由第一帧图像消息的 pub_ns - ts_ns 估算设备时钟 -> 宿主机时钟的偏移 (ns)。
 
-    IMU 消息不含 pub_ns, 但相机与 IMU 共用同一设备时钟域, 用图像消息估出的偏移
-    统一换算即可; 四路相对时序精确保留。
+    IMU 消息不含 pub_ns, 但相机与 IMU 共用同一设备时钟域, 用首帧图像估出的偏移
+    统一换算即可; 四路相对时序精确保留。偏移只在首帧固定一次, 之后不再更新。
     """
 
-    def __init__(self, sample_count: int = 30):
+    def __init__(self):
         self._lock = threading.Lock()
-        self._buf = []
         self._offset = None
-        self._sample_count = sample_count
 
     def observe(self, ts_ns: int, pub_ns: int):
         with self._lock:
-            self._buf.append(pub_ns - ts_ns)
-            if len(self._buf) >= self._sample_count:
-                self._buf.sort()
-                self._offset = self._buf[len(self._buf) // 2]
-                # 保留最近几个继续滑动跟踪 (设备时钟缓慢漂移)
-                self._buf = self._buf[-5:]
+            # 只取首帧固定偏移一次, 不做滑动更新
+            if self._offset is None:
+                self._offset = pub_ns - ts_ns
 
     def to_ros_time(self, ts_ns: int) -> rospy.Time:
         with self._lock:
@@ -123,17 +120,17 @@ class ClockOffset:
 # 配置 / zenoh session
 # ---------------------------------------------------------------------------
 def load_config(path):
-    """读取 head_ring.yaml, 只取 bridge 需要的字段: prefix / sockets / zenoh 端点。"""
+    """读取 head_ring.yaml, 只取 bridge 需要的字段: prefix / topics / zenoh 端点。"""
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
 
     zen = cfg.get("zenoh", {})
     prefix = zen.get("prefix") or "head_ring"
-    sockets = (cfg.get("camera", {}).get("sockets")
-               or ["CAM_A", "CAM_B", "CAM_C", "CAM_D"])
+    topics = (cfg.get("camera", {}).get("topics")
+              or ["cam_0", "cam_1", "cam_2", "cam_3"])
     return {
         "prefix": prefix,
-        "sockets": sockets,
+        "topics": topics,
         "connect": zen.get("connect", []),
         "listen": zen.get("listen", []),
     }
@@ -187,7 +184,7 @@ def _stats_loop(stats: Stats, stop: threading.Event):
 
 def run(cfg: dict):
     prefix = cfg["prefix"]
-    cam_names = [s.lower() for s in cfg["sockets"]]  # CAM_A -> cam_a
+    cam_names = cfg["topics"]  # cam_0 ... cam_3
 
     rospy.init_node("camera_ros_bridge_node", anonymous=False)
 
@@ -281,11 +278,13 @@ def run(cfg: dict):
 
 def main():
     parser = argparse.ArgumentParser(description="OAK-FFC 4 目头环 -> ROS 桥接节点 (zenoh 订阅)")
-    parser.add_argument("--config", default=None, help="YAML 配置文件路径 (config/head_ring.yaml)")
+    # 默认配置文件与本脚本同目录: camera/config/head_ring.yaml
+    default_config = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "config", "head_ring.yaml")
+    parser.add_argument("--config", default=default_config,
+                        help="YAML 配置文件路径 (默认 %(default)s)")
     args = parser.parse_args()
 
-    if not args.config:
-        parser.error("缺少 --config 参数: 请指定 config/head_ring.yaml 配置文件")
     run(load_config(args.config))
 
 
