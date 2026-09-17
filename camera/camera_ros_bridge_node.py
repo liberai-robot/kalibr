@@ -45,6 +45,11 @@ _IMU_SIZE = struct.calcsize(_IMU_FMT)
 _FRAME_MAGIC = b"HRF1"
 _IMU_MAGIC = b"HRI1"
 
+# IMU 数据异常判定阈值 (超过视为传感器初始化失败/量程配置错误/链路损坏)
+_ACCEL_MAX_MS2 = 50.0   # 加速度幅值上限 [m/s^2]，约 5g；手持标定正常远小于此
+_GYRO_MAX_RADS = 50.0   # 角速度幅值上限 [rad/s]，约 2865°/s；正常标定远小于此
+_IMU_WARN_PERIOD = 2.0  # 异常警告节流周期 [s]
+
 ENC_NV12 = 0
 ENC_BGR8 = 1
 ENC_MONO8 = 2
@@ -69,6 +74,35 @@ def _unpack_imu_sample(data: bytes):
     if magic != _IMU_MAGIC:
         raise ValueError(f"bad imu magic: {magic!r}")
     return seq, ts, vals[4:7], vals[7:10], vals[10:14], vals[14]
+
+
+def _check_imu_data(accel, gyro):
+    """检查 IMU 加速度计/陀螺仪数据是否异常，异常时打印节流警告。
+
+    kalibr 期望加速度单位 m/s^2、角速度单位 rad/s。出现 NaN/Inf 或幅值超限的
+    样本通常意味着传感器初始化失败 / 量程配置错误 / 链路损坏，会直接导致
+    kalibr 优化发散 (J: nan -> CHOLMOD not positive definite -> Optimization failed)。
+    """
+    accel = np.asarray(accel, dtype=np.float64)
+    gyro = np.asarray(gyro, dtype=np.float64)
+
+    if not np.isfinite(accel).all():
+        rospy.logwarn_throttle(_IMU_WARN_PERIOD,
+                               "IMU 数据异常: 加速度计含 NaN/Inf -> [%.3f, %.3f, %.3f]",
+                               accel[0], accel[1], accel[2])
+    elif np.abs(accel).max() > _ACCEL_MAX_MS2:
+        rospy.logwarn_throttle(_IMU_WARN_PERIOD,
+                               "IMU 数据异常: 加速度计幅值超限 -> [%.1f, %.1f, %.1f] m/s^2 (阈值 %.0f)",
+                               accel[0], accel[1], accel[2], _ACCEL_MAX_MS2)
+
+    if not np.isfinite(gyro).all():
+        rospy.logwarn_throttle(_IMU_WARN_PERIOD,
+                               "IMU 数据异常: 陀螺仪含 NaN/Inf -> [%.3f, %.3f, %.3f]",
+                               gyro[0], gyro[1], gyro[2])
+    elif np.abs(gyro).max() > _GYRO_MAX_RADS:
+        rospy.logwarn_throttle(_IMU_WARN_PERIOD,
+                               "IMU 数据异常: 陀螺仪幅值超限 -> [%.2f, %.2f, %.2f] rad/s (阈值 %.0f)",
+                               gyro[0], gyro[1], gyro[2], _GYRO_MAX_RADS)
 
 
 def _decode_frame(enc: int, payload: bytes, width: int, height: int) -> np.ndarray:
@@ -230,6 +264,8 @@ def run(cfg: dict):
         except Exception as e:
             rospy.logwarn_throttle(10, "IMU 处理失败: %s", e)
             return
+
+        _check_imu_data(accel, gyro)
 
         msg = Imu()
         msg.header.stamp = offset.to_ros_time(ts_ns)
